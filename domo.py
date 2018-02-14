@@ -34,6 +34,9 @@ class Shared(object):
 	# Light fade (time an individual light takes to fade color) maximum in 1/10 seconds
 	fade = 10
 
+	# Default brightness for all lights (this can be overridden in the app)
+	brightness = 127
+
 	# Sonos addresses
 	sonos_addresses = [
 		'192.168.1.68',
@@ -49,6 +52,9 @@ class Shared(object):
 		'thijs': 'Thijs',
 		'xanne': 'Xanne',
 	}
+
+	# Default minimum volume for all speakers (this can be overridden in the app)
+	volume = 15
 	
 	# Init the state
 	def __init__(self, state='none'):
@@ -57,23 +63,18 @@ class Shared(object):
 
 # Networking thread that pings cellphones
 def networking(shared):
-	# print('Starting networking thread')
+	last_state = shared.state
 	while True:
 		# Start with a none state
 		state = 'none'
 		for name, addr in shared.phone_addresses.items():
-			speed = ping.do_one(addr, 1, 64) # Timeout of 1 second, send 64 bytes
-			if speed is not None:
-				state = name if state == 'none' else 'both'
+			try:
+				speed = ping.do_one(addr, 1, 64) # Timeout of 1 second, send 64 bytes
+				if speed is not None:
+					state = name if state == 'none' else 'both'
+			except:
+				print "Ping failed. Network issue?"
 		shared.state = state
-		time.sleep(1)
-
-
-# Output test thread
-def output(shared):
-	# print('Starting output test thread')
-	last_state = shared.state
-	while True:
 		if shared.state != last_state:
 			print "State changed:", shared.state
 			last_state = shared.state
@@ -82,14 +83,13 @@ def output(shared):
 
 # Philips Hue color fade thread
 def hue(shared):
+	last_state = shared.state
+
 	# Connect to bridge
 	b = Bridge('192.168.1.65')
 
 	# If the app is not registered and the button is not pressed, press the button and call connect() (this only needs to be run a single time)
 	b.connect()
-
-	# Get the bridge state (This returns the full dictionary that you can explore)
-	# b.get_api()
 
 	# Set the default color range
 	shared.r = shared.ranges[shared.state]
@@ -100,9 +100,9 @@ def hue(shared):
 		print l.light_id, ":", l.name, "-", ("On" if l.on else "Off"), "- Colormode =", l.colormode
 		l.on = True
 		l.transitiontime = 10
-		l.brightness = 127
+		l.brightness = shared.brightness
 		l.xy = [ 0.33, 0.33 ] # CIE 1931
-	print
+	print ""
 
 	# Light fading function
 	def fade():
@@ -126,20 +126,26 @@ def hue(shared):
 				if shared.state != last_state:
 					shared.r = shared.ranges[shared.state]
 					last_state = shared.state
+					print "Color scheme changed to:", shared.state
 					break
 
-	last_state = shared.state
 	while True:
+		time.sleep(1)
 		if shared.state != last_state:
 			if shared.state != 'none' and last_state == 'none':
+				print "Starting fade with light state", shared.state
+				shared.r = shared.ranges[shared.state]
 				fade()
-				print "Fading done because light was turned off or mode changed..."
-			last_state = shared.state
+				print "Fading paused because light was turned off or mode changed by the app..."
+			else:
+				last_state = shared.state
 
 
 
 # Sonos music playlist thread
 def sonos(shared):
+	last_state = shared.state
+
 	# Init all Sonos devices
 	speakers = [soco.SoCo(address) for address in shared.sonos_addresses]
 	sonos = None
@@ -147,22 +153,21 @@ def sonos(shared):
 	for speaker in speakers:
 		print "-", speaker.player_name, '@', speaker.volume
 		# print speaker.get_speaker_info()
-		volume = max(speaker.volume, 15)
+		volume = max(speaker.volume, shared.volume) # minimum of 15 is default
 		speaker.volume = 1
 		speaker.ramp_to_volume(volume)
 		if sonos is None and speaker.is_coordinator:
 			print "  - This is the main coordinator!"
 			sonos = speaker
-	print
+	print ""
 
-	last_state = shared.state
 	while True:
 		if shared.state != last_state:
 			last_state = shared.state
 			if shared.sonos_playlists[shared.state]:
 				try:
 					playlist = sonos.get_sonos_playlist_by_attr('title', shared.sonos_playlists[shared.state])
-					# print "Starting playlist:", shared.sonos_playlists[shared.state]
+					print "Starting playlist:", shared.sonos_playlists[shared.state]
 					sonos.clear_queue()
 					sonos.add_uri_to_queue(playlist.resources[0].uri)
 					sonos.play_mode = 'SHUFFLE'
@@ -171,14 +176,13 @@ def sonos(shared):
 					print "PLAYLIST NOT FOUND! Create one with this name..."
 			else:
 				sonos.stop()
+		time.sleep(1)
 
 
 # Init the threads
-print "Starting domo arigato...\n"
+print "Starting Domo Arigato automation for Hue and Sonos."
+print "Press CONTROL-C to exit...\n"
 shared = Shared()
-t = threading.Thread(name='output', target=output, args=(shared,))
-t.setDaemon(True)
-t.start()
 t = threading.Thread(name='hue', target=hue, args=(shared,))
 t.setDaemon(True)
 t.start()
