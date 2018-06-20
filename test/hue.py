@@ -6,7 +6,7 @@ from phue import Bridge
 from random import randint, random
 
 # Connect to bridge
-b = Bridge('192.168.1.65')
+b = Bridge('192.168.178.22')
 
 # If the app is not registered and the button is not pressed, press the button and call connect() (this only needs to be run a single time)
 b.connect()
